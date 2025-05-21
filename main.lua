@@ -9,14 +9,20 @@ local selectedOption = 1
 local gameState = "menu"
 local volume = 0.5  -- valor inicial (50%)
 
+local debugMode = true
+
+
+-- Fator de escala para tamanho do jogador e inimigos
+local scaleFactor = 1.5
+
 -- Variáveis do Jogador
 local player = {
     x = 150,
     y = 300,
-    width = 48,
-    height = 48,
+    width = 48 * scaleFactor,
+    height = 48 * scaleFactor,
     speed = 200,
-    jumpForce = 650,
+    jumpForce = 950 / scaleFactor,  -- Ajustado para o novo tamanho
     gravity = 1500,
     velX = 0,
     velY = 0,
@@ -34,7 +40,8 @@ local player = {
     hurtState = false,    -- Estado de "tomando dano"
     hurtTimer = 0,        -- Temporizador para animação de dano
     deathState = false,   -- Estado de "morrendo"
-    deathTimer = 0        -- Temporizador para animação de morte
+    deathTimer = 0,        -- Temporizador para animação de morte
+    score = 0
 }
 
 -- Variáveis do Mapa
@@ -44,11 +51,16 @@ local map = {
     width = 100,  -- largura do mapa em tiles
     height = 20,  -- altura do mapa em tiles
     viewX = 0,    -- posição da câmera
-    viewY = 0
+    viewY = 0,
+    platformSprite = nil  -- Nova variável para a sprite da plataforma
 }
 
 -- Variáveis de Inimigos
 local enemies = {}
+
+-- Variáveis de Coletáveis
+local collectibles = {}
+local collectibleSprite = nil
 
 -- Variáveis para Parallax
 local parallaxLayers = {}
@@ -58,13 +70,32 @@ local parallaxScale = 0.8  -- Escala de exibição das camadas de fundo
 local gameOver = false
 local gameOverTimer = 0
 
+-- Variáveis para sprites e animações dos inimigos
+local enemySprites = {
+    idle = nil,
+    walk = nil,
+    animations = {
+        idle = { frames = {}, frameCount = 4, speed = 5 },
+        walk = { frames = {}, frameCount = 6, speed = 10 }
+    }
+}
+
 -- Carregar recursos e inicializar o jogo
 function love.load()
     love.window.setTitle("Jogo Maneiro")
     love.window.setMode(800, 600)
     love.graphics.setDefaultFilter("nearest", "nearest")  -- para pixels nítidos
     
-    -- Carregando recursos
+    -- Carregar a sprite da plataforma
+    local success, result = pcall(function()
+        map.platformSprite = love.graphics.newImage("plataforma.png")  -- Substitua pelo nome da sua imagem
+    end)
+
+    if not success then
+        print("Erro ao carregar a sprite da plataforma: " .. result)
+    end
+
+    -- Carregar outros recursos
     loadBackgrounds()
     
     fontTitle = love.graphics.newFont(40)
@@ -76,13 +107,19 @@ function love.load()
     -- Carregar sprites do jogador
     loadPlayerSprites()
     
+    -- Carregar sprites dos inimigos
+    loadEnemySprites()
+    
     -- Inicializar mapa
     initializeMap()
     
     -- Inicializar inimigos
     spawnEnemies()
     
-    -- Certifique-se de que o jogador esteja em uma posição visível e segura
+    collectibleSprite = love.graphics.newImage("coletavel.png") -- sua imagem de coletável
+    spawnCollectibles()
+    
+    -- Certifique-se que o jogador esteja em uma posição visível e segura
     resetPlayer()
     
     -- Inicializar com o estado de menu
@@ -93,7 +130,6 @@ end
 
 -- Função para carregar os fundos de parallax
 function loadBackgrounds()
-    -- Ordem das camadas do fundo (do mais distante para o mais próximo)
     local backgroundLayers = {
         "sky",
         "background",
@@ -103,13 +139,12 @@ function loadBackgrounds()
         "road & lamps"
     }
     
-    -- Carregar cada camada
     for i, layerName in ipairs(backgroundLayers) do
         local success, result = pcall(function()
             local img = love.graphics.newImage(layerName .. ".png")
             table.insert(parallaxLayers, {
                 image = img,
-                speed = 0.1 * i,  -- As camadas mais próximas se movem mais rápido
+                speed = 0.1 * i,  
                 width = img:getWidth(),
                 height = img:getHeight()
             })
@@ -121,7 +156,6 @@ function loadBackgrounds()
         end
     end
     
-    -- Se nenhuma camada foi carregada, criar um fundo de backup
     if #parallaxLayers == 0 then
         print("Nenhuma camada de fundo carregada. Usando cor sólida.")
     end
@@ -129,59 +163,29 @@ end
 
 -- Função para carregar sprites do jogador
 function loadPlayerSprites()
-    -- Carregar sprite sheet do jogador
     local success, result = pcall(function()
         player.spriteSheet = love.graphics.newImage("player_sprites.png")
         
-        -- Configurar animações baseadas nas dimensões fornecidas
-        -- Dimensões da sprite sheet: 288x192 (6 colunas x 4 linhas)
         player.animations = {
-            idle = {
-                frames = {},
-                frameCount = 4,
-                speed = 5
-            },
-            walk = {
-                frames = {},
-                frameCount = 6,
-                speed = 10
-            },
-            jump = {
-                frames = {},
-                frameCount = 1,
-                speed = 1
-            },
-            hurt = {
-                frames = {},
-                frameCount = 1,
-                speed = 1
-            },
-            death = {
-                frames = {},
-                frameCount = 1,
-                speed = 1
-            }
+            idle = { frames = {}, frameCount = 4, speed = 5 },
+            walk = { frames = {}, frameCount = 6, speed = 10 },
+            jump = { frames = {}, frameCount = 1, speed = 1 },
+            hurt = { frames = {}, frameCount = 1, speed = 1 },
+            death = { frames = {}, frameCount = 3, speed = 1 }
         }
         
-        -- Criar quads para cada frame da animação Idle (primeira linha)
         for i = 0, player.animations.idle.frameCount - 1 do
             table.insert(player.animations.idle.frames, 
                 love.graphics.newQuad(i * 48, 0, 48, 48, player.spriteSheet:getDimensions()))
         end
-        
-        -- Criar quads para cada frame da animação Walk (segunda linha)
+
         for i = 0, player.animations.walk.frameCount - 1 do
             table.insert(player.animations.walk.frames, 
                 love.graphics.newQuad(i * 48, 48, 48, 48, player.spriteSheet:getDimensions()))
         end
         
-        -- Usar o primeiro frame da terceira linha para Jump
         player.animations.jump.frames = {love.graphics.newQuad(0, 96, 48, 48, player.spriteSheet:getDimensions())}
-        
-        -- Hurt animation (terceira linha, segundo frame)
         player.animations.hurt.frames = {love.graphics.newQuad(48, 96, 48, 48, player.spriteSheet:getDimensions())}
-        
-        -- Death animation (quarta linha, primeiro frame)
         player.animations.death.frames = {love.graphics.newQuad(0, 144, 48, 48, player.spriteSheet:getDimensions())}
         
         print("Sprites do jogador carregadas com sucesso")
@@ -189,105 +193,213 @@ function loadPlayerSprites()
     
     if not success then
         print("Erro ao carregar sprites do jogador: " .. result)
-        print("Usando retângulo colorido como substituto.")
         player.spriteSheet = nil
     end
 end
 
--- Função para inicializar o mapa
-function initializeMap()
-    -- Limpar as tabelas anteriores
-    map.tiles = {}
+-- Função para carregar sprites dos inimigos
+function loadEnemySprites()
+    local success, result = pcall(function()
+        enemySprites.idle = love.graphics.newImage("enemy_idle.png")  -- Substitua pelo nome da sua imagem
+        enemySprites.walk = love.graphics.newImage("enemy_walk.png")  -- Substitua pelo nome da sua imagem
+        
+        -- Carregar quadros de animação de idle
+        for i = 0, enemySprites.animations.idle.frameCount - 1 do
+            table.insert(enemySprites.animations.idle.frames, 
+                love.graphics.newQuad(i * 48, 0, 48, 48, enemySprites.idle:getDimensions()))
+        end
+        
+        -- Carregar quadros de animação de walk
+        for i = 0, enemySprites.animations.walk.frameCount - 1 do
+            table.insert(enemySprites.animations.walk.frames, 
+                love.graphics.newQuad(i * 48, 0, 48, 48, enemySprites.walk:getDimensions()))
+        end
+        
+        print("Sprites dos inimigos carregadas com sucesso")
+    end)
     
-    -- Criando um mapa mais estruturado e jogável
+    if not success then
+        print("Erro ao carregar sprites dos inimigos: " .. result)
+        enemySprites.idle = nil
+        enemySprites.walk = nil
+    end
+end
+
+-- Função para inicializar o mapa
+-- Função para inicializar o mapa com plataformas maiores e menos numerosas
+-- Função para inicializar o mapa com plataformas variadas após a posição 2027
+function initializeMap()
+    map.width = 170
+    map.tiles = {}
+
     for y = 1, map.height do
         map.tiles[y] = {}
         for x = 1, map.width do
-            -- Criar base sólida (chão principal com buracos)
+            -- Chão principal até a posição x=72 (2027px)
             if y == map.height - 1 then
-                -- Criar alguns buracos estratégicos para desafio
-                if (x > 12 and x < 15) or (x > 28 and x < 32) or (x > 45 and x < 50) or
-                   (x > 60 and x < 65) or (x > 80 and x < 85) then
-                    map.tiles[y][x] = 0  -- buraco
+                if x < 72 and ((x > 15 and x < 20) or (x > 40 and x < 45)) then
+                    map.tiles[y][x] = 0
+                elseif x >= 72 then
+                    -- Segmentar o chão após x=72 em plataformas menores
+                    if (x >= 74 and x <= 79) or 
+                       (x >= 86 and x <= 91) or 
+                       (x >= 98 and x <= 103) or 
+                       (x >= 110 and x <= 115) or 
+                       (x >= 122 and x <= 127) or 
+                       (x >= 134 and x <= 139) or 
+                       (x >= 146 and x <= 151) or 
+                       (x >= 158 and x <= 163) then
+                        map.tiles[y][x] = 1
+                    else
+                        map.tiles[y][x] = 0
+                    end
                 else
-                    map.tiles[y][x] = 1  -- bloco sólido (chão)
+                    map.tiles[y][x] = 1
                 end
-            -- Criar plataformas em alturas acessíveis
-            elseif (y == map.height - 5 and x >= 10 and x <= 15) or
-                   (y == map.height - 4 and x >= 20 and x <= 25) or
-                   (y == map.height - 6 and x >= 30 and x <= 35) or
-                   (y == map.height - 5 and x >= 40 and x <= 45) or
-                   (y == map.height - 7 and x >= 50 and x <= 55) or
-                   (y == map.height - 6 and x >= 60 and x <= 65) or
-                   (y == map.height - 5 and x >= 70 and x <= 75) or
-                   (y == map.height - 4 and x >= 80 and x <= 85) then
+            -- Plataforma de ajuda na posição ~1692 (x=53)
+            elseif y == map.height - 4 and x >= 52 and x <= 56 then
                 map.tiles[y][x] = 1
-            -- Criar algumas plataformas flutuantes em alturas acessíveis
-            elseif (y == map.height - 9 and x >= 15 and x <= 18) or
-                   (y == map.height - 10 and x >= 25 and x <= 28) or
-                   (y == map.height - 11 and x >= 35 and x <= 38) or
-                   (y == map.height - 9 and x >= 45 and x <= 48) or
-                   (y == map.height - 10 and x >= 55 and x <= 58) or
-                   (y == map.height - 11 and x >= 65 and x <= 68) or
-                   (y == map.height - 9 and x >= 75 and x <= 78) then
+
+            -- Plataformas principais antes da área infinita
+            elseif (y == map.height - 5 and x >= 10 and x <= 15) or    -- 1
+                   (y == map.height - 6 and x >= 22 and x <= 27) or     -- 2
+                   (y == map.height - 5 and x >= 34 and x <= 39) or     -- 3
+                   (y == map.height - 7 and x >= 46 and x <= 51) or     -- 4
+                   (y == map.height - 6 and x >= 58 and x <= 63) then   -- 5
                 map.tiles[y][x] = 1
-            -- Criar limites nas bordas do mapa
-            elseif x == 1 or x == map.width then
+
+            -- Plataformas altas
+            elseif (y == map.height - 9 and x >= 30 and x <= 33) or     -- Alta 1
+                   (y == map.height - 10 and x >= 50 and x <= 53) then  -- Alta 2
                 map.tiles[y][x] = 1
+                
+            -- Novas plataformas após a posição x=72 (2027px), seguindo o layout original
+            elseif (y == map.height - 5 and x >= 74 and x <= 79) or     -- Nova 1
+                   (y == map.height - 6 and x >= 86 and x <= 91) or     -- Nova 2
+                   (y == map.height - 5 and x >= 98 and x <= 103) or    -- Nova 3
+                   (y == map.height - 7 and x >= 110 and x <= 115) or   -- Nova 4
+                   (y == map.height - 6 and x >= 122 and x <= 127) or   -- Nova 5
+                   (y == map.height - 5 and x >= 134 and x <= 139) or   -- Nova 6
+                   (y == map.height - 7 and x >= 146 and x <= 151) or   -- Nova 7
+                   (y == map.height - 6 and x >= 158 and x <= 163) then -- Nova 8
+                map.tiles[y][x] = 1
+                
+            -- Plataformas altas após a posição x=72 (2027px)
+            elseif (y == map.height - 9 and x >= 90 and x <= 93) or     -- Nova Alta 1
+                   (y == map.height - 10 and x >= 130 and x <= 133) then -- Nova Alta 2
+                map.tiles[y][x] = 1
+                
+            -- Plataforma final pequena para transição
+            elseif y == map.height - 3 and x >= 167 and x <= 170 then
+                map.tiles[y][x] = 1
+                
             else
                 map.tiles[y][x] = 0
             end
         end
     end
-    
-    -- Adicionar uma plataforma segura para o jogador começar
-    for x = 3, 7 do
+
+    -- Plataforma inicial (spawn)
+    for x = 3, 8 do
         map.tiles[map.height - 2][x] = 1
     end
-    
-    print("Mapa inicializado com sucesso")
+
+    -- Remoção correta da plataforma acima do spawn
+    for x = 3, 8 do
+        map.tiles[map.height - 3][x] = 0
+    end
 end
 
--- Função para criar inimigos
 function spawnEnemies()
-    -- Limpar lista de inimigos
-    enemies = {}
-    
-    -- Colocar inimigos em plataformas específicas, não muito próximos uns dos outros
-    local enemyPositions = {
-        {x = 12 * map.tileSize, y = (map.height - 6) * map.tileSize - 32},
-        {x = 22 * map.tileSize, y = (map.height - 5) * map.tileSize - 32},
-        {x = 32 * map.tileSize, y = (map.height - 7) * map.tileSize - 32},
-        {x = 42 * map.tileSize, y = (map.height - 6) * map.tileSize - 32},
-        {x = 52 * map.tileSize, y = (map.height - 8) * map.tileSize - 32},
-        {x = 62 * map.tileSize, y = (map.height - 7) * map.tileSize - 32},
-        {x = 72 * map.tileSize, y = (map.height - 6) * map.tileSize - 32},
-        {x = 82 * map.tileSize, y = (map.height - 5) * map.tileSize - 32}
+    enemies = {
+        -- Inimigos nas plataformas principais (mantidos do código original)
+        {x = 14 * map.tileSize, y = (map.height - 6) * map.tileSize - 48 * scaleFactor, platformStart = 12 * map.tileSize, platformEnd = 16 * map.tileSize},
+        {x = 24 * map.tileSize, y = (map.height - 7) * map.tileSize - 48 * scaleFactor, platformStart = 22 * map.tileSize, platformEnd = 26 * map.tileSize},
+        {x = 36 * map.tileSize, y = (map.height - 6) * map.tileSize - 48 * scaleFactor, platformStart = 34 * map.tileSize, platformEnd = 38 * map.tileSize},
+        {x = 48 * map.tileSize, y = (map.height - 8) * map.tileSize - 48 * scaleFactor, platformStart = 46 * map.tileSize, platformEnd = 50 * map.tileSize},
+        {x = 60 * map.tileSize, y = (map.height - 7) * map.tileSize - 48 * scaleFactor, platformStart = 58 * map.tileSize, platformEnd = 62 * map.tileSize},
+        
+        -- Inimigos nas plataformas altas (mantidos do código original)
+        {x = 32 * map.tileSize, y = (map.height - 10) * map.tileSize - 48 * scaleFactor, platformStart = 30 * map.tileSize, platformEnd = 34 * map.tileSize},
+        {x = 52 * map.tileSize, y = (map.height - 11) * map.tileSize - 48 * scaleFactor, platformStart = 50 * map.tileSize, platformEnd = 54 * map.tileSize},
+        
+        -- Novos inimigos nas plataformas após 2027px (seguindo o padrão original)
+        {x = 76 * map.tileSize, y = (map.height - 6) * map.tileSize - 48 * scaleFactor, platformStart = 74 * map.tileSize, platformEnd = 79 * map.tileSize},
+        {x = 88 * map.tileSize, y = (map.height - 7) * map.tileSize - 48 * scaleFactor, platformStart = 86 * map.tileSize, platformEnd = 91 * map.tileSize},
+        {x = 100 * map.tileSize, y = (map.height - 6) * map.tileSize - 48 * scaleFactor, platformStart = 98 * map.tileSize, platformEnd = 103 * map.tileSize},
+        {x = 112 * map.tileSize, y = (map.height - 8) * map.tileSize - 48 * scaleFactor, platformStart = 110 * map.tileSize, platformEnd = 115 * map.tileSize},
+        {x = 124 * map.tileSize, y = (map.height - 7) * map.tileSize - 48 * scaleFactor, platformStart = 122 * map.tileSize, platformEnd = 127 * map.tileSize},
+        {x = 136 * map.tileSize, y = (map.height - 6) * map.tileSize - 48 * scaleFactor, platformStart = 134 * map.tileSize, platformEnd = 139 * map.tileSize},
+        {x = 148 * map.tileSize, y = (map.height - 8) * map.tileSize - 48 * scaleFactor, platformStart = 146 * map.tileSize, platformEnd = 151 * map.tileSize},
+        {x = 160 * map.tileSize, y = (map.height - 7) * map.tileSize - 48 * scaleFactor, platformStart = 158 * map.tileSize, platformEnd = 163 * map.tileSize},
+        
+        -- Inimigos nas plataformas altas após 2027px
+        {x = 92 * map.tileSize, y = (map.height - 10) * map.tileSize - 48 * scaleFactor, platformStart = 90 * map.tileSize, platformEnd = 94 * map.tileSize},
+        {x = 132 * map.tileSize, y = (map.height - 11) * map.tileSize - 48 * scaleFactor, platformStart = 130 * map.tileSize, platformEnd = 134 * map.tileSize}
+        
+        -- Inimigo na plataforma final removido conforme solicitado
     }
     
-    for _, pos in ipairs(enemyPositions) do
-        table.insert(enemies, {
-            x = pos.x,
-            y = pos.y,
-            width = 32,
-            height = 32,
-            speed = 50,
-            direction = (math.random() < 0.5) and -1 or 1,
-            type = "basic",
-            platformStart = pos.x - 32 * 2,  -- Limitar movimento a 2 tiles para cada lado
-            platformEnd = pos.x + 32 * 2
-        })
+    -- Configuração comum para todos inimigos
+    for _, enemy in ipairs(enemies) do
+        enemy.width = 48 * scaleFactor
+        enemy.height = 48 * scaleFactor
+        enemy.speed = 60  -- Velocidade aumentada
+        enemy.direction = (math.random() < 0.5) and -1 or 1
+        enemy.type = "basic"
+        enemy.currentAnimation = "idle"
+        enemy.animTimer = 0
+        enemy.frame = 1
     end
-    
-    print("Inimigos criados: " .. #enemies)
 end
 
--- Atualização da lógica do jogo
+function spawnCollectibles()
+    collectibles = {
+        -- Coletáveis em plataformas com inimigos (mantidos do código original)
+        {x = 13 * map.tileSize, y = (map.height - 7) * map.tileSize - 32},  -- Plataforma 1
+        {x = 25 * map.tileSize, y = (map.height - 8) * map.tileSize - 32},  -- Plataforma 2
+        {x = 37 * map.tileSize, y = (map.height - 7) * map.tileSize - 32},  -- Plataforma 3
+        {x = 49 * map.tileSize, y = (map.height - 9) * map.tileSize - 32},  -- Plataforma 4
+        {x = 61 * map.tileSize, y = (map.height - 8) * map.tileSize - 32},  -- Plataforma 5
+        {x = 31 * map.tileSize, y = (map.height - 11) * map.tileSize - 32}, -- Alta 1
+        {x = 51 * map.tileSize, y = (map.height - 12) * map.tileSize - 32}, -- Alta 2
+        
+        -- Coletáveis em plataformas sem inimigos (mantidos do código original)
+        {x = 20 * map.tileSize, y = (map.height - 6) * map.tileSize - 32},  -- Plataforma auxiliar
+        {x = 55 * map.tileSize, y = (map.height - 5) * map.tileSize - 32},  -- Plataforma auxiliar
+        
+        -- Novos coletáveis nas plataformas após 2027px (seguindo o padrão original)
+        {x = 77 * map.tileSize, y = (map.height - 7) * map.tileSize - 32},  -- Nova 1
+        {x = 89 * map.tileSize, y = (map.height - 8) * map.tileSize - 32},  -- Nova 2
+        {x = 101 * map.tileSize, y = (map.height - 7) * map.tileSize - 32}, -- Nova 3
+        {x = 113 * map.tileSize, y = (map.height - 9) * map.tileSize - 32}, -- Nova 4
+        {x = 125 * map.tileSize, y = (map.height - 8) * map.tileSize - 32}, -- Nova 5
+        {x = 137 * map.tileSize, y = (map.height - 7) * map.tileSize - 32}, -- Nova 6
+        {x = 149 * map.tileSize, y = (map.height - 9) * map.tileSize - 32}, -- Nova 7
+        {x = 161 * map.tileSize, y = (map.height - 8) * map.tileSize - 32}, -- Nova 8
+        
+        -- Coletáveis nas plataformas altas após 2027px
+        {x = 91 * map.tileSize, y = (map.height - 11) * map.tileSize - 32}, -- Nova Alta 1
+        {x = 131 * map.tileSize, y = (map.height - 12) * map.tileSize - 32} -- Nova Alta 2
+        
+        -- Coletável na plataforma final removido conforme solicitado
+    }
+    
+    -- Configuração comum para todos coletáveis
+    for _, item in ipairs(collectibles) do
+        item.width = 16
+        item.height = 16
+        item.collected = false
+    end
+end
+
+-- Função para atualizar a lógica do jogo
+-- Função para atualizar a lógica do jogo
 function love.update(dt)
     if gameState == "jogo" then
         if gameOver then
             gameOverTimer = gameOverTimer + dt
-            if gameOverTimer >= 3 then  -- Mostrar tela de game over por 3 segundos
+            if gameOverTimer >= 3 then
                 gameState = "menu"
                 gameOver = false
                 gameOverTimer = 0
@@ -295,25 +407,25 @@ function love.update(dt)
         else
             updatePlayer(dt)
             updateEnemies(dt)
+            updateEnemyAnimations(dt)
             updateCamera()
         end
     end
 end
 
 -- Função para atualizar a posição e estado do jogador
+-- Função para atualizar a posição e estado do jogador com colisão horizontal melhorada e suave
 function updatePlayer(dt)
-    -- Se estiver no estado de morte, não processar movimentos
     if player.deathState then
         player.deathTimer = player.deathTimer + dt
-        if player.deathTimer >= 2 then  -- Mostrar animação de morte por 2 segundos
+        if player.deathTimer >= 2 then
             gameOver = true
             player.deathState = false
             player.deathTimer = 0
         end
         return
     end
-    
-    -- Atualizar timer de invulnerabilidade após dano
+
     if player.invulnerable then
         player.invulnerableTimer = player.invulnerableTimer + dt
         if player.invulnerableTimer >= 1.5 then
@@ -321,8 +433,7 @@ function updatePlayer(dt)
             player.invulnerableTimer = 0
         end
     end
-    
-    -- Atualizar animação de dano
+
     if player.hurtState then
         player.hurtTimer = player.hurtTimer + dt
         if player.hurtTimer >= 0.5 then
@@ -331,7 +442,6 @@ function updatePlayer(dt)
         end
         player.currentAnimation = "hurt"
     else
-        -- Movimento horizontal (se não estiver no estado de dano)
         player.velX = 0
         if love.keyboard.isDown("left") then
             player.velX = -player.speed
@@ -350,92 +460,94 @@ function updatePlayer(dt)
                 player.currentAnimation = "idle"
             end
         end
-        
-        -- Manter animação de pulo quando estiver no ar
+
         if not player.onGround then
             player.currentAnimation = "jump"
         end
     end
-    
-    -- Aplicar gravidade
+
     player.velY = player.velY + player.gravity * dt
-    
-    -- Verificar se está no chão
     player.onGround = false
+
     local futureY = player.y + player.velY * dt
-    local tilesBelow = checkTilesAtPosition(player.x + 5, player.x + player.width - 5, futureY + player.height)
-    if tilesBelow and player.velY > 0 then
-        player.y = math.floor((futureY + player.height) / map.tileSize) * map.tileSize - player.height
-        player.velY = 0
-        player.onGround = true
+    local wantsToDrop = love.keyboard.isDown("down")
+    local bottomY = futureY + player.height
+    local tileY = math.floor(bottomY / map.tileSize) + 1
+    local tileX1 = math.floor((player.x + 5) / map.tileSize) + 1
+    local tileX2 = math.floor((player.x + player.width - 5) / map.tileSize) + 1
+    local landed = false
+
+    if player.velY > 0 and not wantsToDrop then
+        for x = tileX1, tileX2 do
+            if x >= 1 and x <= map.width and tileY >= 1 and tileY <= map.height then
+                if map.tiles[tileY][x] and map.tiles[tileY][x] > 0 then
+                    local platformTop = (tileY - 1) * map.tileSize
+                    -- Só colide se o jogador estiver acima da plataforma
+                    if player.y + player.height <= platformTop + 5 then
+                        player.y = platformTop - player.height
+                        player.velY = 0
+                        player.onGround = true
+                        landed = true
+                        break
+                    end
+                end
+            end
+        end
     end
-    
-    -- Pular (apenas se não estiver no estado de dano)
+
+    if not landed then
+        player.y = futureY
+    end
+
+    -- Pulo
     if not player.hurtState and player.onGround and love.keyboard.isDown("space") then
         player.velY = -player.jumpForce
         player.currentAnimation = "jump"
     end
-    
-    -- Movimento horizontal (com colisões corrigidas)
+
+    -- Movimento horizontal (sem colisão lateral com plataformas)
     local futureX = player.x + player.velX * dt
-    local collisionBuffer = 5
-    
-    -- Verificação de colisão horizontal melhorada
-    local tilesHorizontal = false
-    if player.velX > 0 then  -- Movendo para direita
-        tilesHorizontal = checkTilesAtPosition(
-            futureX + player.width - collisionBuffer, 
-            futureX + player.width + 1, 
-            player.y + collisionBuffer, 
-            player.y + player.height - collisionBuffer
-        )
-    elseif player.velX < 0 then  -- Movendo para esquerda
-        tilesHorizontal = checkTilesAtPosition(
-            futureX - 1, 
-            futureX + collisionBuffer, 
-            player.y + collisionBuffer, 
-            player.y + player.height - collisionBuffer
-        )
+
+    if futureX < 0 then
+        futureX = 0
+    elseif futureX + player.width > map.width * map.tileSize then
+        futureX = map.width * map.tileSize - player.width
     end
 
-    if not tilesHorizontal then
-        player.x = futureX
-    else
-        -- Colisão suave com as paredes - evitar o "teleporte"
-        if player.velX > 0 then
-            -- Ajustar até a borda do tile, não além
-            local tileX = math.floor((futureX + player.width) / map.tileSize) * map.tileSize
-            player.x = tileX - player.width - 0.1 -- pequeno offset para evitar ficar preso
-        else
-            -- Ajustar até a borda do tile, não além
-            local tileX = math.ceil(futureX / map.tileSize) * map.tileSize
-            player.x = tileX + 0.1 -- pequeno offset para evitar ficar preso
-        end
-        player.velX = 0 -- parar o movimento ao colidir
-    end
-    
-    -- Aplicar movimento vertical (com colisões)
-    if not player.onGround then
-        futureY = player.y + player.velY * dt
-        local tilesAbove = checkTilesAtPosition(player.x + 5, player.x + player.width - 5, futureY)
-        if tilesAbove and player.velY < 0 then
-            player.y = math.ceil(futureY / map.tileSize) * map.tileSize
-            player.velY = 0
-        else
-            player.y = futureY
-        end
-    end
-    
-    -- Atualizar animação
+    player.x = futureX
+
     updateAnimation(dt)
-    
-    -- Verificar se caiu para fora do mapa (void)
+
     if player.y > map.height * map.tileSize then
         playerDeath()
     end
-    
-    -- Verificar colisões com inimigos
+
     checkEnemyCollisions()
+    checkCollectibleCollisions()
+end
+
+
+-- Função para atualizar animação dos inimigos
+-- Função para atualizar animação dos inimigos
+function updateEnemyAnimations(dt)
+    for _, enemy in ipairs(enemies) do
+        local anim = enemySprites.animations[enemy.currentAnimation]
+        if anim then
+            enemy.animTimer = enemy.animTimer + dt * anim.speed
+            enemy.frame = math.floor(enemy.animTimer % anim.frameCount) + 1
+
+            if enemy.frame > anim.frameCount then
+                enemy.frame = 1
+                enemy.animTimer = 0
+            end
+        end
+        
+        if enemy.speed * enemy.direction ~= 0 then
+            enemy.currentAnimation = "walk"
+        else
+            enemy.currentAnimation = "idle"
+        end
+    end
 end
 
 -- Função para verificar se há tiles nas coordenadas especificadas
@@ -483,12 +595,12 @@ function updateAnimation(dt)
 end
 
 -- Função para atualizar inimigos
+-- Atualizar inimigos
+-- Atualizar inimigos
 function updateEnemies(dt)
     for i, enemy in ipairs(enemies) do
-        -- Movimento controlado dentro da plataforma
         enemy.x = enemy.x + enemy.speed * enemy.direction * dt
         
-        -- Verificar limites da plataforma
         if enemy.x <= enemy.platformStart then
             enemy.x = enemy.platformStart
             enemy.direction = 1
@@ -497,7 +609,6 @@ function updateEnemies(dt)
             enemy.direction = -1
         end
         
-        -- Verificar colisões com o cenário para maior robustez
         local frontTileX = (enemy.direction > 0) and 
             math.ceil((enemy.x + enemy.width) / map.tileSize) or 
             math.floor(enemy.x / map.tileSize) + 1
@@ -509,13 +620,11 @@ function updateEnemies(dt)
             end
         end
         
-        -- Verificar se tem chão para andar
         local floorTileX = math.floor((enemy.x + enemy.width/2) / map.tileSize) + 1
         local floorTileY = math.floor((enemy.y + enemy.height + 2) / map.tileSize) + 1
         
         if floorTileY <= map.height and (floorTileX < 1 or floorTileX > map.width or
            not map.tiles[floorTileY][floorTileX] or map.tiles[floorTileY][floorTileX] == 0) then
-            -- Tentar corrigir a posição
             enemy.direction = -enemy.direction
         end
     end
@@ -533,6 +642,9 @@ function checkEnemyCollisions()
                 -- Eliminar inimigo
                 table.remove(enemies, i)
                 player.velY = -player.jumpForce * 0.6  -- pequeno salto após derrotar inimigo
+                player.score = player.score + 10
+                print("Inimigo derrotado! Pontuação: " .. player.score)
+
             else
                 -- Jogador é atingido
                 playerHurt()
@@ -541,6 +653,21 @@ function checkEnemyCollisions()
         end
     end
 end
+
+function checkCollectibleCollisions()
+    for _, item in ipairs(collectibles) do
+        if not item.collected then
+            local itemBox = {x = item.x, y = item.y, width = 16, height = 16}
+            if intersect(player, itemBox) then
+                item.collected = true
+                player.score = player.score + 10
+                print("Pegou coletável! Score: " .. player.score)
+            end
+        end
+    end
+end
+
+
 
 -- Função para quando o jogador leva dano
 function playerHurt()
@@ -569,19 +696,23 @@ end
 
 -- Função para resetar o jogador
 function resetPlayer()
-    -- Posicione o jogador no início do mapa
-    player.x = 150
-    player.y = (map.height - 3) * map.tileSize - player.height
+    -- Posicione o jogador no início do mapa (centralizado na plataforma inicial)
+    player.x = 3 * map.tileSize  -- Posiciona na primeira tile da plataforma inicial
+    player.y = (map.height - 2) * map.tileSize - player.height  -- Em cima da plataforma inicial
     player.velX = 0
     player.velY = 0
     player.lives = 3
     player.invulnerable = false
     player.invulnerableTimer = 0
     player.hurtState = false
+    player.score = 0
     player.hurtTimer = 0
     player.deathState = false
     player.deathTimer = 0
     player.currentAnimation = "idle"
+    
+    -- Reiniciar os coletáveis
+    spawnCollectibles()
     
     -- Reiniciar inimigos
     spawnEnemies()
@@ -589,6 +720,7 @@ function resetPlayer()
     -- Imprimir a posição do jogador para debugging
     print("Jogador resetado para posição: " .. player.x .. ", " .. player.y)
 end
+
 
 -- Função para detectar interseção entre dois retângulos
 function intersect(a, b)
@@ -670,7 +802,7 @@ end
 function drawMenu()
     love.graphics.setFont(fontTitle)
     love.graphics.setColor(1, 1, 1)
-    love.graphics.printf("Jogo Urbano", 0, 80, love.graphics.getWidth(), "center")
+    love.graphics.printf("Save The Churrasco", 0, 80, love.graphics.getWidth(), "center")
     love.graphics.setFont(fontMenu)
     for i, option in ipairs(menuOptions) do
         if i == selectedOption then
@@ -706,6 +838,10 @@ function drawGame()
     
     -- Desenhar inimigos
     drawEnemies()
+    
+    -- Desenhar coletáveis
+    drawCollectibles()
+
     
     -- Desenhar jogador
     drawPlayer()
@@ -762,100 +898,142 @@ function drawMap()
     local endX = math.ceil((map.viewX + love.graphics.getWidth()) / map.tileSize)
     local startY = math.floor(map.viewY / map.tileSize) + 1
     local endY = math.ceil((map.viewY + love.graphics.getHeight()) / map.tileSize)
-    
+
     -- Limitar às dimensões do mapa
     startX = math.max(1, startX)
     endX = math.min(map.width, endX)
     startY = math.max(1, startY)
     endY = math.min(map.height, endY)
-    
-    -- Desenhar apenas os tiles visíveis
+
+    -- Desenhar plataformas como objetos contínuos
     for y = startY, endY do
-        for x = startX, endX do
-            if map.tiles[y][x] and map.tiles[y][x] > 0 then
-                -- Escolher cor com base no tipo de tile
-                if map.tiles[y][x] == 1 then
-                    love.graphics.setColor(0.6, 0.6, 0.6)  -- Cinza para blocos padrão
-                else
-                    love.graphics.setColor(0.4, 0.4, 0.4)  -- Cinza escuro para outros tipos
+        local platformStart = nil
+        local platformWidth = 0
+        
+        for x = startX, endX + 1 do  -- +1 para garantir que processe o último tile
+            -- Verificar se é um tile de plataforma
+            local isTile = (x <= endX) and map.tiles[y][x] and map.tiles[y][x] == 1
+            
+            if isTile and platformStart == nil then
+                -- Início de uma nova plataforma
+                platformStart = x
+                platformWidth = 1
+            elseif isTile and platformStart ~= nil then
+                -- Continuação da plataforma atual
+                platformWidth = platformWidth + 1
+            elseif not isTile and platformStart ~= nil then
+                -- Fim da plataforma, desenhar como uma única unidade
+                if map.platformSprite then
+                    -- Calcular a posição e escala da plataforma
+                    local px = (platformStart - 1) * map.tileSize
+                    local py = (y - 1) * map.tileSize
+                    local scaleX = (platformWidth * map.tileSize) / map.platformSprite:getWidth()
+                    local scaleY = map.tileSize / map.platformSprite:getHeight()
+                    
+                    -- Desenhar a plataforma como uma única sprite esticada
+                    love.graphics.setColor(1, 1, 1)
+                    love.graphics.draw(map.platformSprite, px, py, 0, scaleX, scaleY)
                 end
                 
-                love.graphics.rectangle("fill", 
-                                      (x - 1) * map.tileSize, 
-                                      (y - 1) * map.tileSize, 
-                                      map.tileSize, 
-                                      map.tileSize)
-                
-                -- Adicionar bordas para melhor visualização
-                love.graphics.setColor(0.3, 0.3, 0.3)
-                love.graphics.rectangle("line", 
-                                      (x - 1) * map.tileSize, 
-                                      (y - 1) * map.tileSize, 
-                                      map.tileSize, 
-                                      map.tileSize)
+                -- Resetar para a próxima plataforma
+                platformStart = nil
+                platformWidth = 0
+            end
+        end
+    end
+    
+    if debugMode then
+      for y = startY, endY do
+          for x = startX, endX do
+              if map.tiles[y][x] == 1 then
+                  local tileX = (x - 1) * map.tileSize
+                  local tileY = (y - 1) * map.tileSize
+                  love.graphics.setColor(0, 1, 0, 0.5) -- Verde com transparência
+                  love.graphics.setLineWidth(2)
+                  love.graphics.rectangle("line", tileX, tileY, map.tileSize, map.tileSize)
+              end
+          end
+      end
+    end
+end
+
+-- Desenhar os inimigos usando sprites
+-- Função para desenhar os inimigos usando sprites
+function drawEnemies()
+    for _, enemy in ipairs(enemies) do
+        if isOnScreen(enemy.x, enemy.y, enemy.width, enemy.height) then
+            local animName = enemy.currentAnimation or "idle"
+            local anim = enemySprites.animations[animName]
+            local spriteSheet = enemySprites[animName]
+            if anim and spriteSheet then
+                local quad = anim.frames[enemy.frame]
+                if quad then
+                    local scaleX = enemy.direction == -1 and -1 or 1
+                    local offsetX = enemy.direction == -1 and enemy.width or 0
+                    
+                    love.graphics.setColor(1,1,1)
+                    love.graphics.draw(spriteSheet, quad, enemy.x + offsetX, enemy.y, 0, scaleX * scaleFactor, scaleFactor)
+
+                    if debugMode then
+                        love.graphics.setColor(1, 0, 0)
+                        love.graphics.setLineWidth(2)
+                        love.graphics.rectangle("line", enemy.x, enemy.y, enemy.width, enemy.height)
+                    end
+                end
             end
         end
     end
 end
 
--- Desenhar os inimigos
-function drawEnemies()
-    for _, enemy in ipairs(enemies) do
-        -- Desenhar apenas inimigos visíveis na tela
-        if isOnScreen(enemy.x, enemy.y, enemy.width, enemy.height) then
-            -- Cor vermelha para inimigos básicos
-            love.graphics.setColor(1, 0, 0)
-            love.graphics.rectangle("fill", enemy.x, enemy.y, enemy.width, enemy.height)
-            
-            -- Olhos do inimigo para indicar direção
+function drawCollectibles()
+    for _, item in ipairs(collectibles) do
+        if not item.collected and isOnScreen(item.x, item.y, 16, 16) then
             love.graphics.setColor(1, 1, 1)
-            local eyeX = enemy.x + (enemy.direction > 0 and 20 or 5)
-            love.graphics.rectangle("fill", eyeX, enemy.y + 8, 8, 8)
-            
-            -- Contorno
-            love.graphics.setColor(0.5, 0, 0)
-            love.graphics.rectangle("line", enemy.x, enemy.y, enemy.width, enemy.height)
+            if collectibleSprite then
+                love.graphics.draw(collectibleSprite, item.x, item.y)
+            else
+                love.graphics.setColor(1, 1, 0)
+                love.graphics.rectangle("fill", item.x, item.y, 16, 16)
+            end
         end
     end
 end
 
 -- Desenhar o jogador
+-- Função para desenhar o jogador
 function drawPlayer()
-    -- Definir a cor base (para backup se não houver sprites)
     if player.hurtState then
-        love.graphics.setColor(1, 0.3, 0.3)  -- Vermelho claro quando ferido
+        love.graphics.setColor(1, 0.3, 0.3)
     elseif player.invulnerable then
-        -- Piscar quando invulnerável
         local alpha = 0.3 + 0.7 * math.abs(math.sin(love.timer.getTime() * 10))
         love.graphics.setColor(player.color[1], player.color[2], player.color[3], alpha)
     else
         love.graphics.setColor(player.color)
     end
     
-    -- Desenhar o jogador usando sprites se disponíveis
     if player.spriteSheet then
-        love.graphics.setColor(1, 1, 1)  -- Reset para branco para sprites
+        love.graphics.setColor(1, 1, 1)
         
-        -- Se invulnerável, aplicar efeito de transparência
         if player.invulnerable and not player.hurtState then
             local alpha = 0.3 + 0.7 * math.abs(math.sin(love.timer.getTime() * 10))
             love.graphics.setColor(1, 1, 1, alpha)
         end
         
-        -- Obter o frame atual da animação
         local anim = player.animations[player.currentAnimation]
         local quad = anim.frames[player.frame]
         
-        -- Desenhar a sprite virada para a direção correta
         local scaleX = (player.direction == "left") and -1 or 1
         local offsetX = (player.direction == "left") and player.width or 0
         
-        love.graphics.draw(player.spriteSheet, quad, player.x + offsetX, player.y, 0, scaleX, 1)
+        love.graphics.draw(player.spriteSheet, quad, player.x + offsetX, player.y, 0, scaleX * scaleFactor, scaleFactor)
+        if debugMode then
+            love.graphics.setColor(0, 1, 0)
+            love.graphics.setLineWidth(2)
+            love.graphics.rectangle("line", player.x, player.y, player.width, player.height)
+        end
     else
-        -- Fallback para retângulo colorido se não houver sprites
         love.graphics.rectangle("fill", player.x, player.y, player.width, player.height)
-        
-        -- Olhos para indicar direção
+        -- Caixa de colisão do jogador (modo debug)
         love.graphics.setColor(1, 1, 1)
         local eyeX = player.x + (player.direction == "right" and player.width - 15 or 5)
         love.graphics.rectangle("fill", eyeX, player.y + 10, 10, 5)
@@ -876,6 +1054,9 @@ function drawHUD()
     love.graphics.setColor(1, 1, 1)
     local posText = "POS: " .. math.floor(player.x) .. "," .. math.floor(player.y)
     love.graphics.print(posText, 10, 40)
+    
+    love.graphics.setColor(1, 1, 0)
+    love.graphics.print("Pontuação: " .. player.score, 10, 65)
     
     -- Mostrar instruções básicas
     love.graphics.setColor(1, 1, 1, 0.7)
@@ -904,6 +1085,26 @@ function drawDebugInfo()
     end
 end
 
+function drawCollectibles()
+    for _, item in ipairs(collectibles) do
+        if not item.collected and isOnScreen(item.x, item.y, 16, 16) then
+            if collectibleSprite then
+                love.graphics.setColor(1, 1, 1)
+                love.graphics.draw(collectibleSprite, item.x, item.y)
+            else
+                love.graphics.setColor(1, 1, 0)
+                love.graphics.rectangle("fill", item.x, item.y, 16, 16)
+            end
+
+            if debugMode then
+                love.graphics.setColor(1, 0, 0)
+                love.graphics.setLineWidth(2)
+                love.graphics.rectangle("line", item.x, item.y, 16, 16)
+            end
+        end
+    end
+end
+
 -- Verificar teclado para menu e configurações
 function love.keypressed(key)
     if gameState == "menu" then
@@ -921,6 +1122,7 @@ function love.keypressed(key)
         -- Controles durante o jogo
         if key == "escape" then
             gameState = "menu"
+            gameOver = false
         elseif key == "space" and player.onGround and not player.hurtState then
             -- Pular (o movimento é tratado em updatePlayer)
         elseif key == "r" then
@@ -938,6 +1140,43 @@ function love.keypressed(key)
             volume = math.min(1, volume + 0.1)
             love.audio.setVolume(volume)
         end
+    end
+    if key == "down" then
+    -- Posição atual do jogador
+      local jogadorBottom = player.y + player.height
+      local colunaX1 = math.floor((player.x + 5) / map.tileSize) + 1
+      local colunaX2 = math.floor((player.x + player.width - 5) / map.tileSize) + 1
+
+      -- Encontra a próxima plataforma abaixo do jogador
+      local plataformaMaisBaixa = nil
+
+      for y = math.floor(jogadorBottom / map.tileSize) + 1, map.height do
+          for x = colunaX1, colunaX2 do
+              if map.tiles[y] and map.tiles[y][x] and map.tiles[y][x] > 0 then
+                  plataformaMaisBaixa = y
+                  break
+              end
+          end
+          if plataformaMaisBaixa then break end
+      end
+
+    -- Verifica se há plataforma abaixo da atual
+      if plataformaMaisBaixa then
+          -- Só desce se NÃO estiver já nessa plataforma
+          local yPlataforma = (plataformaMaisBaixa - 1) * map.tileSize
+          if player.y + player.height <= yPlataforma then
+              player.y = player.y + 5
+              player.onGround = false
+          else
+              print("Já está na plataforma mais baixa.")
+          end
+      else
+          print("Nenhuma plataforma abaixo. Não pode descer.")
+      end
+    end
+
+    if key == "f2" then
+      debugMode = not debugMode
     end
 end
 
