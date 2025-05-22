@@ -1,6 +1,6 @@
 -- Arquivo: main.lua
 
--- Variáveis Globais.
+-- Variáveis Globais..
 local background = {}
 local fontTitle
 local fontMenu
