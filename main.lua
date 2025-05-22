@@ -8,6 +8,7 @@ local menuOptions = {"Iniciar Jogo", "Configurações", "Sair"}
 local selectedOption = 1
 local gameState = "menu"
 local volume = 0.5  -- valor inicial (50%)
+local heartSprite = nil
 
 local debugMode = true
 
@@ -19,7 +20,7 @@ local scaleFactor = 1.5
 local player = {
     x = 150,
     y = 300,
-    width = 48 * scaleFactor,
+    width = 36 * scaleFactor,
     height = 48 * scaleFactor,
     speed = 200,
     jumpForce = 950 / scaleFactor,  -- Ajustado para o novo tamanho
@@ -93,6 +94,14 @@ function love.load()
 
     if not success then
         print("Erro ao carregar a sprite da plataforma: " .. result)
+    end
+    
+    success, result = pcall(function()
+        heartSprite = love.graphics.newImage("coracao_vida.png")
+    end)
+    
+    if not success then
+        print("Erro ao carregar a sprite do coração: " .. result)
     end
 
     -- Carregar outros recursos
@@ -313,35 +322,55 @@ end
 function spawnEnemies()
     enemies = {
         -- Inimigos nas plataformas principais (mantidos do código original)
-        {x = 14 * map.tileSize, y = (map.height - 6) * map.tileSize - 48 * scaleFactor, platformStart = 12 * map.tileSize, platformEnd = 16 * map.tileSize},
-        {x = 24 * map.tileSize, y = (map.height - 7) * map.tileSize - 48 * scaleFactor, platformStart = 22 * map.tileSize, platformEnd = 26 * map.tileSize},
-        {x = 36 * map.tileSize, y = (map.height - 6) * map.tileSize - 48 * scaleFactor, platformStart = 34 * map.tileSize, platformEnd = 38 * map.tileSize},
-        {x = 48 * map.tileSize, y = (map.height - 8) * map.tileSize - 48 * scaleFactor, platformStart = 46 * map.tileSize, platformEnd = 50 * map.tileSize},
-        {x = 60 * map.tileSize, y = (map.height - 7) * map.tileSize - 48 * scaleFactor, platformStart = 58 * map.tileSize, platformEnd = 62 * map.tileSize},
+        {platformStart = 12 * map.tileSize, platformEnd = 16 * map.tileSize},
+        {platformStart = 22 * map.tileSize, platformEnd = 26 * map.tileSize},
+        {platformStart = 34 * map.tileSize, platformEnd = 38 * map.tileSize},
+        {platformStart = 46 * map.tileSize, platformEnd = 50 * map.tileSize},
+        {platformStart = 58 * map.tileSize, platformEnd = 62 * map.tileSize},
         
         -- Inimigos nas plataformas altas (mantidos do código original)
-        {x = 32 * map.tileSize, y = (map.height - 10) * map.tileSize - 48 * scaleFactor, platformStart = 30 * map.tileSize, platformEnd = 34 * map.tileSize},
-        {x = 52 * map.tileSize, y = (map.height - 11) * map.tileSize - 48 * scaleFactor, platformStart = 50 * map.tileSize, platformEnd = 54 * map.tileSize},
+        {platformStart = 30 * map.tileSize, platformEnd = 34 * map.tileSize},
+        {platformStart = 50 * map.tileSize, platformEnd = 54 * map.tileSize},
         
         -- Novos inimigos nas plataformas após 2027px (seguindo o padrão original)
-        {x = 76 * map.tileSize, y = (map.height - 6) * map.tileSize - 48 * scaleFactor, platformStart = 74 * map.tileSize, platformEnd = 79 * map.tileSize},
-        {x = 88 * map.tileSize, y = (map.height - 7) * map.tileSize - 48 * scaleFactor, platformStart = 86 * map.tileSize, platformEnd = 91 * map.tileSize},
-        {x = 100 * map.tileSize, y = (map.height - 6) * map.tileSize - 48 * scaleFactor, platformStart = 98 * map.tileSize, platformEnd = 103 * map.tileSize},
-        {x = 112 * map.tileSize, y = (map.height - 8) * map.tileSize - 48 * scaleFactor, platformStart = 110 * map.tileSize, platformEnd = 115 * map.tileSize},
-        {x = 124 * map.tileSize, y = (map.height - 7) * map.tileSize - 48 * scaleFactor, platformStart = 122 * map.tileSize, platformEnd = 127 * map.tileSize},
-        {x = 136 * map.tileSize, y = (map.height - 6) * map.tileSize - 48 * scaleFactor, platformStart = 134 * map.tileSize, platformEnd = 139 * map.tileSize},
-        {x = 148 * map.tileSize, y = (map.height - 8) * map.tileSize - 48 * scaleFactor, platformStart = 146 * map.tileSize, platformEnd = 151 * map.tileSize},
-        {x = 160 * map.tileSize, y = (map.height - 7) * map.tileSize - 48 * scaleFactor, platformStart = 158 * map.tileSize, platformEnd = 163 * map.tileSize},
+        {platformStart = 74 * map.tileSize, platformEnd = 79 * map.tileSize},
+        {platformStart = 86 * map.tileSize, platformEnd = 91 * map.tileSize},
+        {platformStart = 98 * map.tileSize, platformEnd = 103 * map.tileSize},
+        {platformStart = 110 * map.tileSize, platformEnd = 115 * map.tileSize},
+        {platformStart = 122 * map.tileSize, platformEnd = 127 * map.tileSize},
+        {platformStart = 134 * map.tileSize, platformEnd = 139 * map.tileSize},
+        {platformStart = 146 * map.tileSize, platformEnd = 151 * map.tileSize},
+        {platformStart = 158 * map.tileSize, platformEnd = 163 * map.tileSize},
         
         -- Inimigos nas plataformas altas após 2027px
-        {x = 92 * map.tileSize, y = (map.height - 10) * map.tileSize - 48 * scaleFactor, platformStart = 90 * map.tileSize, platformEnd = 94 * map.tileSize},
-        {x = 132 * map.tileSize, y = (map.height - 11) * map.tileSize - 48 * scaleFactor, platformStart = 130 * map.tileSize, platformEnd = 134 * map.tileSize}
-        
-        -- Inimigo na plataforma final removido conforme solicitado
+        {platformStart = 90 * map.tileSize, platformEnd = 94 * map.tileSize},
+        {platformStart = 130 * map.tileSize, platformEnd = 134 * map.tileSize}
     }
     
     -- Configuração comum para todos inimigos
     for _, enemy in ipairs(enemies) do
+        -- Calcula o centro da plataforma para posicionar o inimigo
+        local platformWidth = enemy.platformEnd - enemy.platformStart
+        enemy.x = enemy.platformStart + (platformWidth - 48 * scaleFactor) / 2
+        
+        -- Determina a altura do inimigo com base na plataforma
+        local platformTileX = math.floor(enemy.platformStart / map.tileSize) + 1
+        local platformFound = false
+        
+        -- Procura a plataforma de cima para baixo
+        for y = 1, map.height - 1 do
+            if map.tiles[y][platformTileX] and map.tiles[y][platformTileX] > 0 then
+                enemy.y = (y - 1) * map.tileSize - 48 * scaleFactor
+                platformFound = true
+                break
+            end
+        end
+        
+        -- Se não encontrou a plataforma, usa uma posição padrão
+        if not platformFound then
+            enemy.y = (map.height - 2) * map.tileSize - 48 * scaleFactor
+        end
+        
         enemy.width = 48 * scaleFactor
         enemy.height = 48 * scaleFactor
         enemy.speed = 60  -- Velocidade aumentada
@@ -350,8 +379,10 @@ function spawnEnemies()
         enemy.currentAnimation = "idle"
         enemy.animTimer = 0
         enemy.frame = 1
+        enemy.platformDetected = false
     end
 end
+
 
 function spawnCollectibles()
     collectibles = {
@@ -595,36 +626,63 @@ function updateAnimation(dt)
 end
 
 -- Função para atualizar inimigos
--- Atualizar inimigos
--- Atualizar inimigos
+-- Função para atualizar inimigos
+-- Modificada para garantir que os inimigos percorram dinamicamente toda a plataforma
 function updateEnemies(dt)
     for i, enemy in ipairs(enemies) do
+        -- Atualiza a posição do inimigo
         enemy.x = enemy.x + enemy.speed * enemy.direction * dt
         
-        if enemy.x <= enemy.platformStart then
+        -- Verifica se o inimigo chegou nos limites da plataforma
+        if enemy.direction == -1 and enemy.x <= enemy.platformStart then
             enemy.x = enemy.platformStart
             enemy.direction = 1
-        elseif enemy.x + enemy.width >= enemy.platformEnd then
+        elseif enemy.direction == 1 and enemy.x + enemy.width >= enemy.platformEnd then
             enemy.x = enemy.platformEnd - enemy.width
             enemy.direction = -1
         end
         
-        local frontTileX = (enemy.direction > 0) and 
-            math.ceil((enemy.x + enemy.width) / map.tileSize) or 
-            math.floor(enemy.x / map.tileSize) + 1
-        local bodyTileY = math.floor(enemy.y / map.tileSize) + 1
+        -- Detecta dinamicamente os limites da plataforma
+        local enemyTileY = math.floor((enemy.y + enemy.height) / map.tileSize) + 1
         
-        if frontTileX >= 1 and frontTileX <= map.width and bodyTileY >= 1 and bodyTileY <= map.height then
-            if map.tiles[bodyTileY][frontTileX] and map.tiles[bodyTileY][frontTileX] > 0 then
-                enemy.direction = -enemy.direction
+        -- Encontra o início da plataforma (à esquerda)
+        if not enemy.platformDetected then
+            local startX = math.floor(enemy.x / map.tileSize)
+            local endX = math.ceil((enemy.x + enemy.width) / map.tileSize)
+            
+            -- Procura à esquerda até encontrar o fim da plataforma
+            local leftEdge = startX
+            while leftEdge > 0 do
+                if enemyTileY <= map.height and leftEdge >= 1 and 
+                   (not map.tiles[enemyTileY][leftEdge] or map.tiles[enemyTileY][leftEdge] == 0) then
+                    break
+                end
+                leftEdge = leftEdge - 1
             end
+            
+            -- Procura à direita até encontrar o fim da plataforma
+            local rightEdge = endX
+            while rightEdge <= map.width do
+                if enemyTileY <= map.height and rightEdge <= map.width and 
+                   (not map.tiles[enemyTileY][rightEdge] or map.tiles[enemyTileY][rightEdge] == 0) then
+                    break
+                end
+                rightEdge = rightEdge + 1
+            end
+            
+            -- Atualiza os limites da plataforma
+            enemy.platformStart = (leftEdge + 1) * map.tileSize
+            enemy.platformEnd = (rightEdge - 1) * map.tileSize + map.tileSize
+            enemy.platformDetected = true
         end
         
+        -- Verificação de segurança para chão
         local floorTileX = math.floor((enemy.x + enemy.width/2) / map.tileSize) + 1
         local floorTileY = math.floor((enemy.y + enemy.height + 2) / map.tileSize) + 1
         
         if floorTileY <= map.height and (floorTileX < 1 or floorTileX > map.width or
            not map.tiles[floorTileY][floorTileX] or map.tiles[floorTileY][floorTileX] == 0) then
+            -- Se não houver chão, inverte a direção
             enemy.direction = -enemy.direction
         end
     end
@@ -1044,10 +1102,17 @@ end
 function drawHUD()
     love.graphics.setFont(fontMenu)
     
-    -- Desenhar contador de vidas
-    love.graphics.setColor(1, 0, 0)
+    -- Desenhar corações para vidas (substituindo os quadrados)
+    love.graphics.setColor(1, 1, 1)
     for i = 1, player.lives do
-        love.graphics.rectangle("fill", (i-1) * 30 + 10, 10, 20, 20)
+        if heartSprite then
+            local scale = 20 / 450
+            love.graphics.draw(heartSprite, (i-1) * 30 + 10, 10, 0, scale, scale)
+        else
+            -- Fallback para os quadrados originais caso a imagem não carregue
+            love.graphics.setColor(1, 0, 0)
+            love.graphics.rectangle("fill", (i-1) * 30 + 10, 10, 20, 20)
+        end
     end
     
     -- Mostrar pontuação ou outros dados relevantes
@@ -1057,10 +1122,6 @@ function drawHUD()
     
     love.graphics.setColor(1, 1, 0)
     love.graphics.print("Pontuação: " .. player.score, 10, 65)
-    
-    -- Mostrar instruções básicas
-    love.graphics.setColor(1, 1, 1, 0.7)
-    love.graphics.print("← → para mover, SPACE para pular, ESC para menu", 10, love.graphics.getHeight() - 30)
 end
 
 -- Função para verificar se um objeto está visível na tela
